@@ -1,6 +1,10 @@
 """
 Detection module for person detection from video frames.
 Supports both YOLOv8 real detection and mock detection for testing.
+
+Fallback detection for CPU-only environments:
+If YOLOv8 is not available, MockDetector provides deterministic simulations
+with realistic movement patterns for testing and development.
 """
 
 from dataclasses import dataclass

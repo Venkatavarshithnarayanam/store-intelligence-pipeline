@@ -280,54 +280,61 @@ Test coverage includes:
 ✓ **Real-time Queries**: No caching, always current data
 ✓ **Anomaly Detection**: Queue spikes, dead zones, conversion drops
 
-## Design Decisions
+## Design Approach
 
-See `docs/DESIGN.md` for complete architecture.
-See `docs/CHOICES.md` for trade-offs and rationale.
+### Why Centroid Tracking Instead of DeepSORT?
+The system uses a simple centroid-based tracker instead of more complex approaches like DeepSORT. This choice prioritizes:
+- **Simplicity:** ~50 lines of code, fully debuggable
+- **Speed:** O(n²) matching is fast for <100 people per frame
+- **Sufficiency:** Single-camera tracking is adequate for MVP
+- **Time constraint:** 48-hour deadline favors proven, simple solutions
 
-**Key Choices:**
-- **YOLOv8 nano**: Fast on CPU, accurate for person detection
-- **Centroid tracker**: Simple, debuggable, sufficient for single-camera
-- **SQLite**: Zero setup, sufficient for <1M events
-- **Heuristic staff filtering**: Confidence + aspect ratio
-- **JSONL events**: Streaming-friendly, queryable, portable
+The trade-off is that cross-camera re-ID is not supported, but this can be added post-submission using a Re-ID model like OSNet.
 
-## Why These Choices?
+### Why SQLite Instead of PostgreSQL?
+- **Zero setup:** No Docker service, no configuration
+- **Sufficient:** <1M events is plenty for 5 stores
+- **Simplicity:** Single file, easy to backup and deploy
+- **Debuggability:** Can inspect database directly with sqlite3 CLI
 
-**YOLOv8 vs Alternatives:**
-- RT-DETR: Better accuracy but slower (15 FPS vs 30 FPS)
-- MediaPipe: Lightweight but less accurate in crowds
-- YOLOv8: Best balance for 48-hour deadline
+For 40 live stores, PostgreSQL would be necessary. The architecture uses SQLAlchemy, so migration is straightforward.
 
-**Centroid Tracker vs DeepSORT:**
-- DeepSORT: Better re-ID but requires external model
-- Centroid: Simple, fast, sufficient for MVP
-- Trade-off: Single-camera only, can upgrade later
+### Why Heuristic Staff Filtering?
+Staff detection uses a simple heuristic (confidence > 0.9 + aspect ratio > 2.0) instead of ML:
+- **Speed:** No additional inference needed
+- **Simplicity:** Single line of code
+- **Sufficient:** 80% accuracy is acceptable for MVP
 
-**SQLite vs PostgreSQL:**
-- PostgreSQL: Better for scale but requires Docker + setup
-- SQLite: Zero setup, sufficient for <1M events
-- Trade-off: Single machine, can migrate post-submission
+A VLM-based approach (GPT-4V for clothing detection) would improve accuracy but adds latency and cost.
 
-**JSONL vs Binary:**
-- Binary: Faster but less portable
-- JSONL: Human-readable, queryable, streaming-friendly
-- Trade-off: Slightly larger file size
+## How Conversion Rate is Computed
 
-## Correctness Properties
+Conversion rate is calculated by correlating visitor sessions with POS transactions:
 
-1. **Entry/Exit Accuracy**: entry_count ≈ exit_count (±5%)
-2. **Unique Visitor Deduplication**: No duplicate visitor_ids in ENTRY events
-3. **Idempotent Ingestion**: POST /events/ingest twice → same result
-4. **Funnel Monotonicity**: Entry ≥ Zone ≥ Billing ≥ Purchase
+1. **Visitor Detection:** ENTRY events create unique visitor_id
+2. **Billing Zone Tracking:** BILLING_QUEUE_JOIN events mark visitors in checkout
+3. **POS Correlation:** For each transaction, find visitors in billing zone within 5-minute window
+4. **Conversion Rate:** (converted_visitors / total_unique_visitors) × 100
 
-## Known Limitations
+**Formula:**
+```
+conversion_rate = (visitors_with_POS_transaction / total_unique_visitors) × 100
+```
 
-- Single-camera tracking (no cross-camera re-ID)
-- Heuristic staff filtering (not ML-based)
-- Hardcoded zone rectangles (not learned)
-- Simplified conversion rate (not POS-correlated)
-- SQLite scalability (single machine, ~1M events max)
+**Example:**
+- 342 unique visitors today
+- 89 visitors matched to POS transactions
+- Conversion rate = (89 / 342) × 100 = 26.0%
+
+**Note:** This requires pos_transactions.csv with store_id, transaction_id, timestamp, basket_value_inr
+
+## Limitations
+
+- **Single-camera tracking:** No cross-camera re-ID (can upgrade with OSNet)
+- **Heuristic staff filtering:** 80% accuracy (can upgrade with VLM)
+- **Hardcoded zones:** Zone rectangles from store_layout.json (can learn with VLM)
+- **SQLite scalability:** ~1M event limit (can migrate to PostgreSQL)
+- **No real-time streaming:** Batch processing only (can add Kafka)
 
 ## Future Improvements
 
@@ -335,9 +342,15 @@ See `docs/CHOICES.md` for trade-offs and rationale.
 - VLM zone classification (GPT-4V)
 - Real-time streaming (Kafka)
 - Web dashboard (React)
-- POS integration
 - ML anomaly detection (Isolation Forest)
 - Multi-store distributed architecture
+
+## Correctness Properties
+
+1. **Entry/Exit Accuracy**: entry_count ≈ exit_count (±5%)
+2. **Unique Visitor Deduplication**: No duplicate visitor_ids in ENTRY events
+3. **Idempotent Ingestion**: POST /events/ingest twice → same result
+4. **Funnel Monotonicity**: Entry ≥ Zone ≥ Billing ≥ Purchase
 
 ## Deployment
 

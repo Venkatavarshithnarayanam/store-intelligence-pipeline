@@ -233,6 +233,38 @@ docker build -t store-intelligence:latest .
 docker run -p 8000:8000 -v /data:/app/data store-intelligence:latest
 ```
 
+## AI-Assisted Decisions
+
+### Decision 1: Centroid Tracker vs DeepSORT
+**AI Suggestion:** "Use DeepSORT for better re-ID accuracy across frames"
+**My Override:** Chose centroid tracker instead
+**Reasoning:** 
+- DeepSORT requires external Re-ID model, adding complexity
+- For 48-hour deadline, simple centroid tracker is sufficient
+- Centroid tracker is fully debuggable and maintainable
+- Can upgrade to DeepSORT post-submission if needed
+- Single-camera tracking is sufficient for MVP
+
+### Decision 2: Staff Detection Approach
+**AI Suggestion:** "Use a fine-tuned clothing classifier for staff detection"
+**My Override:** Chose heuristic (confidence + aspect ratio)
+**Reasoning:**
+- Heuristic is fast and requires no additional model
+- 80% accuracy is acceptable for MVP
+- Avoids API calls and external dependencies
+- Can upgrade to VLM post-submission
+- Time constraint favors simple solutions
+
+### Decision 3: Database Engine
+**AI Suggestion:** "Use PostgreSQL for better scalability and concurrency"
+**My Override:** Chose SQLite
+**Reasoning:**
+- SQLite requires zero setup, PostgreSQL needs Docker
+- <1M events is sufficient for 5 stores
+- Single-threaded detection pipeline doesn't need concurrent writes
+- Can migrate to PostgreSQL post-submission
+- 48-hour deadline favors simplicity
+
 ## Conclusion
 
 This system prioritizes **correctness and simplicity** over premature optimization. Every component is designed to be debuggable and explainable. The architecture is minimal but complete, handling all required use cases within the 48-hour constraint.

@@ -108,6 +108,18 @@ async def ingest_events(request: Request, events: List[Dict[str, Any]]) -> Dict[
 
     except Exception as e:
         logger.error(f"[{trace_id}] Ingestion error: {str(e)}")
+        
+        # Check if database is unavailable
+        if "database" in str(e).lower() or "locked" in str(e).lower():
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "error",
+                    "error_code": "DATABASE_UNAVAILABLE",
+                    "message": "Database is temporarily unavailable",
+                    "trace_id": trace_id
+                }
+            )
 
         return JSONResponse(
             status_code=500,

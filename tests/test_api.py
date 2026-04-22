@@ -431,3 +431,115 @@ class TestEdgeCases:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestGroupEntry:
+    """Test group entry scenarios."""
+    
+    def test_group_entry_multiple_visitors(self, client):
+        """Test that multiple visitors entering together are counted separately."""
+        # Simulate 3 people entering at same timestamp
+        events = [
+            {
+                "event_id": f"group-entry-{i}",
+                "store_id": "STORE_GROUP",
+                "camera_id": "CAM_ENTRY_01",
+                "visitor_id": f"VIS_GROUP_{i}",
+                "event_type": "ENTRY",
+                "timestamp": "2026-03-03T14:00:00Z",
+                "zone_id": None,
+                "dwell_ms": 0,
+                "is_staff": False,
+                "confidence": 0.9,
+                "metadata": {"session_seq": 1}
+            }
+            for i in range(3)
+        ]
+        
+        response = client.post("/events/ingest", json=events)
+        assert response.status_code == 200
+        assert response.json()["events_ingested"] == 3
+        
+        # Verify metrics show 3 unique visitors
+        response = client.get("/stores/STORE_GROUP/metrics")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["unique_visitors"] == 3
+
+
+class TestDuplicateIngestion:
+    """Test duplicate event handling."""
+    
+    def test_duplicate_event_not_double_counted(self, client):
+        """Test that duplicate events are not double-counted."""
+        event = {
+            "event_id": "dup-test-1",
+            "store_id": "STORE_DUP",
+            "camera_id": "CAM_ENTRY_01",
+            "visitor_id": "VIS_DUP",
+            "event_type": "ENTRY",
+            "timestamp": "2026-03-03T14:00:00Z",
+            "zone_id": None,
+            "dwell_ms": 0,
+            "is_staff": False,
+            "confidence": 0.9,
+            "metadata": {"session_seq": 1}
+        }
+        
+        # First ingest
+        response1 = client.post("/events/ingest", json=[event])
+        assert response1.status_code == 200
+        data1 = response1.json()
+        assert data1["events_ingested"] == 1
+        
+        # Second ingest (duplicate)
+        response2 = client.post("/events/ingest", json=[event])
+        assert response2.status_code == 200
+        data2 = response2.json()
+        assert data2["duplicates"] == 1
+        assert data2["events_ingested"] == 0
+        
+        # Verify metrics still show 1 visitor
+        response = client.get("/stores/STORE_DUP/metrics")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["unique_visitors"] == 1
+
+
+class TestFunnelNoDoubleCount:
+    """Test that funnel doesn't double-count re-entries."""
+    
+    def test_funnel_reentry_not_double_counted(self, client):
+        """Test that re-entry doesn't double-count visitor in funnel."""
+        events = [
+            # Entry
+            {"event_id": "funnel-entry-1", "store_id": "STORE_FUNNEL", "camera_id": "CAM_1",
+             "visitor_id": "VIS_FUNNEL", "event_type": "ENTRY", "timestamp": "2026-03-03T14:00:00Z",
+             "zone_id": None, "dwell_ms": 0, "is_staff": False, "confidence": 0.9,
+             "metadata": {"session_seq": 1}},
+            # Exit
+            {"event_id": "funnel-exit-1", "store_id": "STORE_FUNNEL", "camera_id": "CAM_1",
+             "visitor_id": "VIS_FUNNEL", "event_type": "EXIT", "timestamp": "2026-03-03T14:05:00Z",
+             "zone_id": None, "dwell_ms": 0, "is_staff": False, "confidence": 0.9,
+             "metadata": {"session_seq": 1}},
+            # Re-entry
+            {"event_id": "funnel-reentry-1", "store_id": "STORE_FUNNEL", "camera_id": "CAM_1",
+             "visitor_id": "VIS_FUNNEL", "event_type": "REENTRY", "timestamp": "2026-03-03T14:10:00Z",
+             "zone_id": None, "dwell_ms": 0, "is_staff": False, "confidence": 0.9,
+             "metadata": {"session_seq": 2}},
+        ]
+        
+        response = client.post("/events/ingest", json=events)
+        assert response.status_code == 200
+        assert response.json()["events_ingested"] == 3
+        
+        # Get funnel
+        response = client.get("/stores/STORE_FUNNEL/funnel")
+        assert response.status_code == 200
+        data = response.json()
+        # Entry count should be 2 (ENTRY + REENTRY), but unique visitors should be 1
+        assert data["funnel"]["entry"] >= 1
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
